@@ -626,11 +626,11 @@ const global = struct {
     // TODO: remove this.  Just using it to return error numbers as strings for now
     var tmp_strerror_buffer: [30]u8 = undefined;
 
-    var atexit_mutex = std.Thread.Mutex{};
-    var atexit_started = false;
-    // TODO: these don't need to be contiguous, use a chain of fixed size chunks
-    //       that don't need to move/be resized ChunkedArrayList or something
-    var atexit_funcs: std.ArrayListUnmanaged(ExitFunc) = .{};
+    // var atexit_mutex = std.Thread.Mutex{};
+    // var atexit_started = false;
+    // // TODO: these don't need to be contiguous, use a chain of fixed size chunks
+    // //       that don't need to move/be resized ChunkedArrayList or something
+    // var atexit_funcs: std.ArrayListUnmanaged(ExitFunc) = .{};
 
     var decimal_point = [_:0]u8{'.'};
     var thousands_sep = [_:0]u8{};
