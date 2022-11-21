@@ -6,3 +6,11 @@ comptime {
     if (modules.linux) _ = @import("linux.zig");
     if (modules.gnu) _ = @import("gnu.zig");
 }
+
+const std = @import("std");
+pub fn log(level: std.log.Level, comptime scope: @TypeOf(.literal), comptime fmt: []const u8, args: anytype) void {
+    _ = scope;
+    _ = level;
+    _ = fmt;
+    _ = args;
+}
