@@ -11,11 +11,56 @@ pub const LibVariant = enum {
     full,
 };
 pub const Start = enum {
+    none,
     ziglibc,
     glibc,
 };
+
+pub const Features = struct {
+    pub const full = Features{
+        .cstd = true,
+        .linux = true,
+        .posix = true,
+        .gnu = true,
+    };
+    pub const only_std = Features{
+        .cstd = true,
+        .linux = false,
+        .posix = false,
+        .gnu = false,
+    };
+    pub const only_posix = Features{
+        .cstd = false,
+        .linux = false,
+        .posix = true,
+        .gnu = false,
+    };
+    pub const only_linux = Features{
+        .cstd = false,
+        .linux = true,
+        .posix = false,
+        .gnu = false,
+    };
+    pub const only_gnu = Features{
+        .cstd = false,
+        .linux = false,
+        .posix = false,
+        .gnu = true,
+    };
+
+    cstd: bool,
+    linux: bool,
+    posix: bool,
+    gnu: bool,
+
+    pub fn isFull(ft: Features) bool {
+        return ft.cstd and ft.linux and ft.posix and ft.gnu;
+    }
+};
 pub const ZigLibcOptions = struct {
-    variant: LibVariant,
+    features: Features,
+
+    name: ?[]const u8 = null,
     link: LinkKind,
     start: Start,
     trace: bool,
@@ -37,7 +82,7 @@ pub fn addZigStart(
 ) *CompileStep {
     const lib = builder.addStaticLibrary(.{
         .name = "start",
-        .root_source_file = relpath("src" ++ std.fs.path.sep_str ++ "start.zig"),
+        .root_source_file = relpath("src/start.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -50,15 +95,24 @@ pub fn addZigStart(
 // Returns ziglibc as a CompileStep
 // Caller will also need to add the include path to get the C headers
 pub fn addLibc(builder: *std.build.Builder, opt: ZigLibcOptions) *CompileStep {
-    const name = switch (opt.variant) {
-        .only_std => "c-only-std",
-        .only_posix => "c-only-posix",
-        .only_linux => "c-only-linux",
-        .only_gnu => "c-only-gnu",
-        //.full => "c",
-        .full => "cguana", // use cguana to avoid passing in '-lc' to zig which will
-        // cause it to add the system libc headers
+    const name = if (opt.name) |name|
+        name
+    else blk: {
+        var name_builder = std.ArrayList(u8).init(builder.allocator);
+        defer name_builder.deinit();
+
+        name_builder.appendSlice("cguana") catch @panic("oom");
+
+        if (!opt.features.isFull()) {
+            if (!opt.features.cstd) name_builder.appendSlice("-nostd") catch @panic("oom");
+            if (opt.features.posix) name_builder.appendSlice("-posix") catch @panic("oom");
+            if (opt.features.linux) name_builder.appendSlice("-linux") catch @panic("oom");
+            if (opt.features.gnu) name_builder.appendSlice("-gnu") catch @panic("oom");
+        }
+
+        break :blk name_builder.toOwnedSlice() catch @panic("oom");
     };
+
     const trace_options = builder.addOptions();
     trace_options.addOption(bool, "enabled", opt.trace);
 
@@ -67,7 +121,7 @@ pub fn addLibc(builder: *std.build.Builder, opt: ZigLibcOptions) *CompileStep {
         .glibc => true,
         else => false,
     });
-    const index = relpath("src" ++ std.fs.path.sep_str ++ "lib.zig");
+    const index = relpath("src/lib.zig");
     const lib = switch (opt.link) {
         .static => builder.addStaticLibrary(.{
             .name = name,
@@ -80,10 +134,10 @@ pub fn addLibc(builder: *std.build.Builder, opt: ZigLibcOptions) *CompileStep {
             .root_source_file = index,
             .target = opt.target,
             .optimize = opt.optimize,
-            .version = switch (opt.variant) {
-                .full => .{ .major = 6, .minor = 0, .patch = 0 },
-                else => null,
-            },
+            .version = if (opt.features.isFull())
+                .{ .major = 6, .minor = 0, .patch = 0 }
+            else
+                null,
         }),
     };
     // TODO: not sure if this is reallly needed or not, but it shouldn't hurt
@@ -94,42 +148,28 @@ pub fn addLibc(builder: *std.build.Builder, opt: ZigLibcOptions) *CompileStep {
     const c_flags = [_][]const u8{
         "-std=c11",
     };
-    const include_cstd = switch (opt.variant) {
-        .only_std, .full => true,
-        else => false,
-    };
-    modules_options.addOption(bool, "cstd", include_cstd);
-    if (include_cstd) {
-        lib.addCSourceFile(.{ .file = relpath("src" ++ std.fs.path.sep_str ++ "printf.c"), .flags = &c_flags });
-        lib.addCSourceFile(.{ .file = relpath("src" ++ std.fs.path.sep_str ++ "scanf.c"), .flags = &c_flags });
+    modules_options.addOption(bool, "cstd", opt.features.cstd);
+    if (opt.features.cstd) {
+        lib.addCSourceFile(.{ .file = relpath("src/printf.c"), .flags = &c_flags });
+        lib.addCSourceFile(.{ .file = relpath("src/scanf.c"), .flags = &c_flags });
         if (opt.target.getOsTag() == .linux) {
             lib.addAssemblyFile(relpath("src/linux/jmp.s"));
         }
     }
-    const include_posix = switch (opt.variant) {
-        .only_posix, .full => true,
-        else => false,
-    };
-    modules_options.addOption(bool, "posix", include_posix);
-    if (include_posix) {
-        lib.addCSourceFile(.{ .file = relpath("src" ++ std.fs.path.sep_str ++ "posix.c"), .flags = &c_flags });
+    modules_options.addOption(bool, "posix", opt.features.posix);
+    if (opt.features.posix) {
+        lib.addCSourceFile(.{ .file = relpath("src/posix.c"), .flags = &c_flags });
     }
-    const include_linux = switch (opt.variant) {
-        .only_linux, .full => true,
-        else => false,
-    };
-    modules_options.addOption(bool, "linux", include_linux);
-    if (include_cstd or include_posix) {
-        lib.addIncludePath(relpath("inc" ++ std.fs.path.sep_str ++ "libc"));
-        lib.addIncludePath(relpath("inc" ++ std.fs.path.sep_str ++ "posix"));
+
+    modules_options.addOption(bool, "linux", opt.features.linux);
+    if (opt.features.cstd or opt.features.posix) {
+        lib.addIncludePath(relpath("inc/libc"));
+        lib.addIncludePath(relpath("inc/posix"));
     }
-    const include_gnu = switch (opt.variant) {
-        .only_gnu, .full => true,
-        else => false,
-    };
-    modules_options.addOption(bool, "gnu", include_gnu);
-    if (include_gnu) {
-        lib.addIncludePath(relpath("inc" ++ std.fs.path.sep_str ++ "gnu"));
+
+    modules_options.addOption(bool, "gnu", opt.features.gnu);
+    if (opt.features.gnu) {
+        lib.addIncludePath(relpath("inc/gnu"));
     }
     return lib;
 }
